@@ -23,6 +23,9 @@ llm_config = {
     "cache_seed": 42,
 }
 
+# --- MEMOIRE A COURT TERME ---
+chat_history = []
+
 
 def search_web(query, max_results=3):
     with DDGS() as ddgs:
@@ -79,8 +82,9 @@ user_proxy = autogen.UserProxyAgent(
 )
 
 
+# --- BOUCLE PRINCIPALE ---
 if __name__ == "__main__":
-    print("Votre assistant médical prêt. Tape 'exit' pour quitter.\n")
+    print("Votre assistant médical est prêt. Tape 'exit' pour quitter.\n")
     while True:
         user_input = input("Utilisateur : ")
         if user_input.lower() in ["exit", "quit"]:
@@ -88,5 +92,9 @@ if __name__ == "__main__":
             break
 
         enriched = enrich_prompt_with_docs_and_web(user_input)
-        response = assistant.generate_reply(messages=[{"role": "user", "content": enriched}])
+        chat_history.append({"role": "user", "content": enriched})  # STM
+
+        response = assistant.generate_reply(messages=chat_history)
+
+        chat_history.append({"role": "assistant", "content": str(response)})  # STM
         print(f"\nAssistant : {response}\n")
