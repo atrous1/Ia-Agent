@@ -4,10 +4,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from duckduckgo_search import DDGS
 
-
 os.environ["OPENAI_API_BASE"] = "http://localhost:11434/v1"
 os.environ["OPENAI_API_KEY"] = "ollama"
-
 
 config_list = [
     {
@@ -23,78 +21,85 @@ llm_config = {
     "cache_seed": 42,
 }
 
-# --- MEMOIRE A COURT TERME ---
+# --- Mémoire conversationnelle ---
 chat_history = []
 
-
-def search_web(query, max_results=3):
+# --- Fonction recherche web avec filtrage ---
+def search_web(query, max_results=1):
     with DDGS() as ddgs:
         results = ddgs.text(query)
-        summaries = []
-        for i, r in enumerate(results):
-            if i >= max_results:
-                break
-            summaries.append(f"{r['title']}: {r['body']} (lien: {r['href']})")
-        return "\n".join(summaries)
+        if not results:
+            return None
+        r = results[0]
+        return f"{r['title']}\n{r['body']}\nLien source : {r['href']}"
 
-
-def retrieve_docs(query, k=3):
+# --- Fonction recherche docs avec seuil ---
+def retrieve_docs(query, k=3, max_distance=0.7):
     db = FAISS.load_local(
         "vectorstore",
         HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
         allow_dangerous_deserialization=True,
     )
-    results = db.similarity_search(query, k=k)
-    return results
+    results = db.similarity_search_with_score(query, k=k)
+    print("DEBUG: Scores des documents trouvés:")
+    for doc, score in results:
+        print(f"  Source: {doc.metadata.get('source', 'Inconnu')}, Score (distance): {score}")
 
+    # Ici score est une distance (FAISS), donc plus petit = meilleur
+    filtered = [doc for doc, score in results if score <= max_distance]
 
-def enrich_prompt_with_docs_and_web(query):
-    docs = retrieve_docs(query)
-    doc_context = "\n\n".join([doc.page_content for doc in docs]) if docs else "Aucun document trouvé."
+    if not filtered:
+        return None
 
-    web_results = search_web(query)
-    web_context = web_results if web_results else "Aucun résultat web trouvé."
+    doc = filtered[0]
+    source = doc.metadata.get("source", "Document inconnu")
+    return f"Extrait du document '{source}':\n{doc.page_content}"
 
-    return f"""Tu dois répondre à la question suivante en utilisant les informations ci-dessous.
+# --- Fonction principale pour répondre à une question ---
+def answer_question(query):
+    doc_answer = retrieve_docs(query)
+    if doc_answer is not None:
+        return doc_answer
+    else:
+        web_answer = search_web(query)
+        if web_answer:
+            return web_answer
+        else:
+            return "Désolé, je n'ai pas trouvé d'information pertinente."
 
---- CONTENU DES DOCUMENTS ---
-{doc_context}
+# --- Fonction pour construire le prompt (optionnel) ---
+def build_prompt(user_question):
+    prompt = f"""
+Tu es un agent intelligent capable d'utiliser deux outils : une recherche documentaire locale et une recherche web.
 
---- CONTENU DU WEB ---
-{web_context}
+Ta tâche : répondre à la question suivante de manière claire, précise et naturelle.
 
-Question : {query}
+Tu peux utiliser :
+- La fonction 'retrieve_docs' pour chercher dans les documents internes.
+- La fonction 'search_web' pour chercher sur le web.
+
+Choisis intelligemment quels outils utiliser, et explique brièvement dans ta réponse ce que tu as utilisé.
+
+Question : {user_question}
 """
+    return prompt.strip()
 
 assistant = autogen.AssistantAgent(
-    name="hello",
-    system_message="Tu es un assistant utile. Utilise les documents et la recherche web pour répondre avec précision.",
+    name="rag_agent",
+    system_message="Tu es un assistant RAG intelligent qui utilise la mémoire, la recherche web et documentaire pour répondre clairement.",
     llm_config=llm_config,
+    function_map={
+        "search_web": search_web,
+        "retrieve_docs": retrieve_docs,
+    },
 )
 
-
-user_proxy = autogen.UserProxyAgent(
-    name="user",
-    code_execution_config=False,
-    function_map={  
-        "search_web": search_web
-    }
-)
-
-
-# --- BOUCLE PRINCIPALE ---
 if __name__ == "__main__":
-    print("Votre assistant médical est prêt. Tape 'exit' pour quitter.\n")
     while True:
-        user_input = input("Utilisateur : ")
+        user_input = input("Utilisateur : ").strip()
         if user_input.lower() in ["exit", "quit"]:
             print("Au revoir et merci !")
             break
 
-        enriched = enrich_prompt_with_docs_and_web(user_input)
-        chat_history.append({"role": "user", "content": enriched})  # STM
-
-        response = assistant.generate_reply(messages=chat_history)
-
-        chat_history.append({"role": "assistant", "content": str(response)})  # STM
-        print(f"\nAssistant : {response}\n")
+        response = answer_question(user_input)
+        print(f"\nRéponse :\n{response}\n")
