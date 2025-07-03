@@ -3,6 +3,8 @@ import autogen
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from duckduckgo_search import DDGS
+from fpdf import FPDF 
+from datetime import datetime
 
 os.environ["OPENAI_API_BASE"] = "http://localhost:11434/v1"
 os.environ["OPENAI_API_KEY"] = "ollama"
@@ -67,6 +69,53 @@ def answer_question(query):
         else:
             return "Désolé, je n'ai pas trouvé d'information pertinente."
 
+
+def export_to_pdf(history, dossier="mes_pdfs"):
+    import os
+    from datetime import datetime
+    from fpdf import FPDF
+
+    def clean_text(text):
+        replacements = {
+            '—': '-',  # tiret long → tiret simple
+            '–': '-',  # tiret moyen → tiret simple
+            '“': '"',  # guillemets typographiques → guillemets simples
+            '”': '"',
+            '’': "'",  # apostrophe typographique → apostrophe simple
+            '•': '-',  # puce → tiret simple
+            '\u2026': '...',  # points de suspension
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        return text
+
+    dossier_pdf = os.path.join("C:/Users/USER/Desktop/Agent IA", dossier)
+    print(f"[DEBUG] Chemin dossier PDF : {dossier_pdf}")
+
+    try:
+        os.makedirs(dossier_pdf, exist_ok=True)
+        print(f"[DEBUG] Dossier créé ou déjà existant.")
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"session_{timestamp}.pdf"
+        chemin_complet = os.path.join(dossier_pdf, filename)
+        print(f"[DEBUG] Chemin complet du fichier PDF : {chemin_complet}")
+
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+
+        for i, (user_msg, agent_msg) in enumerate(history):
+            pdf.multi_cell(0, 10, f"Utilisateur : {clean_text(user_msg)}", align="L")
+            pdf.multi_cell(0, 10, f"Agent : {clean_text(agent_msg)}", align="L")
+            pdf.ln(5)
+
+        pdf.output(chemin_complet)
+        print(f"[✅] Conversation enregistrée dans : {chemin_complet}")
+    except Exception as e:
+        print(f"[❌ ERREUR] Impossible d'enregistrer le PDF : {e}")
+
 # --- Fonction pour construire le prompt (optionnel) ---
 def build_prompt(user_question):
     prompt = f"""
@@ -100,6 +149,11 @@ if __name__ == "__main__":
         if user_input.lower() in ["exit", "quit"]:
             print("Au revoir et merci !")
             break
+        elif user_input.lower() == "pdf":
+            export_to_pdf(chat_history)
+            continue
 
         response = answer_question(user_input)
         print(f"\nRéponse :\n{response}\n")
+
+        chat_history.append((user_input, response))
