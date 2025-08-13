@@ -1,14 +1,22 @@
+# === Importation des bibliothèques nécessaires ===
 import os
+import json
+import requests
 import autogen
+from datetime import datetime
+from fpdf import FPDF
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from duckduckgo_search import DDGS
-from fpdf import FPDF 
-from datetime import datetime
+from autogen import OpenAIWrapper
+from langchain_community.chat_models import ChatOpenAI
 
+from langchain.schema import HumanMessage
+
+# === Configuration de l'environnement pour Ollama ===
 os.environ["OPENAI_API_BASE"] = "http://localhost:11434/v1"
 os.environ["OPENAI_API_KEY"] = "ollama"
 
+# === Configuration du modèle à utiliser via Ollama ===
 config_list = [
     {
         "model": "mistral",
@@ -17,25 +25,64 @@ config_list = [
         "price": [0.0, 0.0],
     }
 ]
-
 llm_config = {
     "config_list": config_list,
     "cache_seed": 42,
 }
 
-# --- Mémoire conversationnelle ---
+llm = OpenAIWrapper(config=llm_config)
+
+# === Mémoire conversationnelle ===
 chat_history = []
 
-# --- Fonction recherche web avec filtrage ---
+# === Fonction : Recherche web via Serper.dev ===
 def search_web(query, max_results=1):
-    with DDGS() as ddgs:
-        results = ddgs.text(query)
-        if not results:
-            return None
-        r = results[0]
-        return f"{r['title']}\n{r['body']}\nLien source : {r['href']}"
+    url = "https://google.serper.dev/search"
+    headers = {
+        "X-API-KEY": "8eef4a7e0baed98c9676e4380e3d611630ab6314",
+        "Content-Type": "application/json"
+    }
+    payload = {"q": query}
 
-# --- Fonction recherche docs avec seuil ---
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+
+        if "organic" not in data or not data["organic"]:
+            return None
+
+        top = data["organic"][0]
+        title = top.get("title", "Titre non disponible")
+        snippet = top.get("snippet", "Aucun résumé disponible")
+        link = top.get("link", "Lien non disponible")
+        return title, snippet, link
+
+    except Exception as e:
+        print(f"[ERREUR Serper] {e}")
+        return None
+
+# === Fonction : Enrichir la réponse web ou RAG avec le LLM (sans limite) ===
+def enrich_response_with_llm(snippet, link=None, query=None):
+    prompt = f"Voici une information utile :\n{snippet}"
+    if query:
+        prompt = f"Question : {query}\n\n{prompt}"
+    if link:
+        prompt += f"\n\nLien source : {link}"
+    prompt += "\n\nPeux-tu reformuler cette réponse pour qu'elle soit plus complète, cohérente et naturelle ? Inclue les faits importants et développe la réponse sans limite de longueur."
+
+    try:
+        # Si la librairie supporte max_new_tokens à la place de max_tokens, essaye avec ça
+        response = llm.complete(prompt=prompt, max_tokens=2000)  # ou max_new_tokens=2000
+        # Sinon, envisager de récupérer en streaming ou de fractionner la réponse
+        return response.strip()
+    except Exception as e:
+        print(f"[ERREUR LLM enrichissement] {e}")
+        if link:
+            return f"{snippet}\nLien source : {link}"
+        else:
+            return snippet
+
+# === Fonction : Recherche dans les documents FAISS ===
 def retrieve_docs(query, k=3, max_distance=0.7):
     db = FAISS.load_local(
         "vectorstore",
@@ -45,9 +92,8 @@ def retrieve_docs(query, k=3, max_distance=0.7):
     results = db.similarity_search_with_score(query, k=k)
     print("DEBUG: Scores des documents trouvés:")
     for doc, score in results:
-        print(f"  Source: {doc.metadata.get('source', 'Inconnu')}, Score (distance): {score}")
+        print(f"  Source: {doc.metadata.get('source', 'Inconnu')}, Score: {score}")
 
-    # Ici score est une distance (FAISS), donc plus petit = meilleur
     filtered = [doc for doc, score in results if score <= max_distance]
 
     if not filtered:
@@ -57,85 +103,82 @@ def retrieve_docs(query, k=3, max_distance=0.7):
     source = doc.metadata.get("source", "Document inconnu")
     return f"Extrait du document '{source}':\n{doc.page_content}"
 
-# --- Fonction principale pour répondre à une question ---
-def answer_question(query):
-    doc_answer = retrieve_docs(query)
-    if doc_answer is not None:
-        return doc_answer
+# === Fonction : Construction du contexte MCP ===
+def build_mcp_context(user_input, tools_used, memory):
+    return {
+        "context": {
+            "user_input": user_input,
+            "memory": memory,
+            "tools": [
+                {"name": name, "description": desc} for name, desc in tools_used.items()
+            ],
+        },
+        "message": user_input,
+    }
+
+# === Fonction : Sauvegarde des logs MCP ===
+def save_mcp_log(mcp, log_file="mcp_logs.jsonl"):
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(mcp, ensure_ascii=False) + "\n")
+
+# === Fonction : Répondre à une question utilisateur (MCP) avec priorisation RAG ===
+def answer_question(user_input):
+    memory_text = "\n".join([f"Utilisateur : {q}\nAgent : {r}" for q, r in chat_history[-5:]])
+    tools = {
+        "retrieve_docs": "Cherche des documents internes par similarité vectorielle",
+        "search_web": "Fait une recherche web avec Google via Serper.dev"
+    }
+    mcp = build_mcp_context(user_input, tools, memory_text)
+
+    # Recherche prioritaire dans RAG
+    doc_answer = retrieve_docs(user_input)
+    if doc_answer:
+        mcp["context"]["source_used"] = "retrieve_docs"
+        response = enrich_response_with_llm(snippet=doc_answer, query=user_input)
     else:
-        web_answer = search_web(query)
-        if web_answer:
-            return web_answer
+        web_result = search_web(user_input)
+        if web_result:
+            title, snippet, link = web_result
+            mcp["context"]["source_used"] = "search_web"
+            response = enrich_response_with_llm(snippet=snippet, link=link, query=user_input)
         else:
-            return "Désolé, je n'ai pas trouvé d'information pertinente."
+            mcp["context"]["source_used"] = "none"
+            response = "Désolé, je n'ai pas trouvé d'information pertinente."
 
+    save_mcp_log(mcp)
+    print("[DEBUG MCP]\n", json.dumps(mcp, indent=2, ensure_ascii=False))
+    return response
 
+# === Fonction : Exporter la conversation en PDF ===
 def export_to_pdf(history, dossier="mes_pdfs"):
-    import os
-    from datetime import datetime
-    from fpdf import FPDF
-
     def clean_text(text):
-        replacements = {
-            '—': '-',  # tiret long → tiret simple
-            '–': '-',  # tiret moyen → tiret simple
-            '“': '"',  # guillemets typographiques → guillemets simples
-            '”': '"',
-            '’': "'",  # apostrophe typographique → apostrophe simple
-            '•': '-',  # puce → tiret simple
-            '\u2026': '...',  # points de suspension
-        }
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        return text
+        return text.translate(str.maketrans({
+            '—': '-', '–': '-', '“': '"', '”': '"', '’': "'", '•': '-', '\u2026': '...'
+        }))
 
     dossier_pdf = os.path.join("C:/Users/USER/Desktop/Agent IA", dossier)
-    print(f"[DEBUG] Chemin dossier PDF : {dossier_pdf}")
+    os.makedirs(dossier_pdf, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"session_{timestamp}.pdf"
+    chemin_complet = os.path.join(dossier_pdf, filename)
 
-    try:
-        os.makedirs(dossier_pdf, exist_ok=True)
-        print(f"[DEBUG] Dossier créé ou déjà existant.")
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"session_{timestamp}.pdf"
-        chemin_complet = os.path.join(dossier_pdf, filename)
-        print(f"[DEBUG] Chemin complet du fichier PDF : {chemin_complet}")
+    for user_msg, agent_msg in history:
+        pdf.multi_cell(0, 10, f"Utilisateur : {clean_text(user_msg)}", align="L")
+        pdf.multi_cell(0, 10, f"Agent : {clean_text(agent_msg)}", align="L")
+        pdf.ln(5)
 
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
+    pdf.output(chemin_complet)
+    print(f"[✅] Conversation enregistrée dans : {chemin_complet}")
 
-        for i, (user_msg, agent_msg) in enumerate(history):
-            pdf.multi_cell(0, 10, f"Utilisateur : {clean_text(user_msg)}", align="L")
-            pdf.multi_cell(0, 10, f"Agent : {clean_text(agent_msg)}", align="L")
-            pdf.ln(5)
-
-        pdf.output(chemin_complet)
-        print(f"[✅] Conversation enregistrée dans : {chemin_complet}")
-    except Exception as e:
-        print(f"[❌ ERREUR] Impossible d'enregistrer le PDF : {e}")
-
-# --- Fonction pour construire le prompt (optionnel) ---
-def build_prompt(user_question):
-    prompt = f"""
-Tu es un agent intelligent capable d'utiliser deux outils : une recherche documentaire locale et une recherche web.
-
-Ta tâche : répondre à la question suivante de manière claire, précise et naturelle.
-
-Tu peux utiliser :
-- La fonction 'retrieve_docs' pour chercher dans les documents internes.
-- La fonction 'search_web' pour chercher sur le web.
-
-Choisis intelligemment quels outils utiliser, et explique brièvement dans ta réponse ce que tu as utilisé.
-
-Question : {user_question}
-"""
-    return prompt.strip()
-
+# === Définition de l'agent Autogen ===
 assistant = autogen.AssistantAgent(
     name="rag_agent",
-    system_message="Tu es un assistant RAG intelligent qui utilise la mémoire, la recherche web et documentaire pour répondre clairement.",
+    system_message="Tu es un assistant médical intelligent utilisant la recherche locale, web, et la mémoire pour répondre avec précision.",
     llm_config=llm_config,
     function_map={
         "search_web": search_web,
@@ -143,6 +186,7 @@ assistant = autogen.AssistantAgent(
     },
 )
 
+# === Boucle principale ===
 if __name__ == "__main__":
     while True:
         user_input = input("Utilisateur : ").strip()
@@ -155,5 +199,4 @@ if __name__ == "__main__":
 
         response = answer_question(user_input)
         print(f"\nRéponse :\n{response}\n")
-
         chat_history.append((user_input, response))
