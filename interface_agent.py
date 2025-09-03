@@ -164,19 +164,22 @@ if submitted and user_input.strip():
     response_text = ""
     response_placeholder.markdown("<i>Agent est en train d'écrire...</i>", unsafe_allow_html=True)
 
-    for chunk in answer_question(user_input):
-        response_text += chunk
-        response_placeholder.markdown(f"""
-            <div style="display:flex;justify-content:flex-start;margin:6px 0;">
-                <div style="background:#e9f7ef;color:#0f5132;padding:10px 14px;border-radius:12px;max-width:70%;'>
-                    {response_text}<i> ▌</i>
-                </div>
+    # Ici on ne peut pas faire for chunk in answer_question si answer_question renvoie une str
+    # On le remplace par réponse complète d'un coup
+    response_text = answer_question(user_input)
+
+    response_placeholder.markdown(f"""
+        <div style="display:flex;justify-content:flex-start;margin:6px 0;">
+            <div style="background:#e9f7ef;color:#0f5132;padding:10px 14px;border-radius:12px;max-width:70%;">
+                {response_text}
             </div>
-        """, unsafe_allow_html=True)
+        </div>
+    """, unsafe_allow_html=True)
 
     st.session_state.messages.append(("agent", response_text))
     save_chat(st.session_state.active_conv, st.session_state.messages, st.session_state.conv_title)
     st.stop()
+
 
 # === EXPORT PDF ===
 if st.session_state.messages:
