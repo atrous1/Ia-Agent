@@ -1,14 +1,14 @@
 # --- Librairies de base ---
 numpy>=1.27
-pandas>=2.3.2,<2.4       # dernière version compatible Python 3.13
+pandas>=2.3.2,<2.4       # compatible Python 3.13
 scipy>=1.16
-scikit-learn>=1.8
+scikit-learn>=1.5,<1.8
 python-dateutil
 tzdata
 typing_extensions
 
 # --- LangChain et IA ---
-langchain>=0.3.331      # version récente compatible Python 3.13
+langchain>=0.3.331
 pydantic>=2.11
 orjson
 jsonschema
