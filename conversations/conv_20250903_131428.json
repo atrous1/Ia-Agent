@@ -1,0 +1,14 @@
+{
+  "title": "Nouvelle conversation",
+  "timestamp": "20250903_131505",
+  "messages": [
+    {
+      "role": "user",
+      "content": "c'est quoi le syndrome sec"
+    },
+    {
+      "role": "assistant",
+      "content": " Le syndrome sec que vous demandez est le syndrome de Gougerot-Sjögren ou syndrome de Sjögren, dont je vous l'avais défini précédemment. Cet état est une maladie auto-immune systémique caractérisée par une atteinte des glandes exocrines, en particulier des glandes lacrymales et salivaires. Souhaitez-vous des informations complémentaires sur ce sujet ?"
+    }
+  ]
+}
