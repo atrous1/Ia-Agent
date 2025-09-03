@@ -1,102 +1,80 @@
-# === pp_agent.py - VERSION ULTRA DÉTAILLÉE ===
-# Ce fichier contient toutes les fonctions backend pour l'Agent Médical IA.
-# Fonctions principales :
-# 1. Charger un LLM local via Ollama
-# 2. Effectuer des recherches RAG (vectorstore FAISS)
-# 3. Recherche web via Serper.dev
-# 4. Gérer l'historique des conversations
-# 5. Exporter les conversations en PDF
-# 6. Communiquer avec MCP (Model Context Protocol)
-
-# === IMPORTS ===
-import os          # Pour la gestion des chemins et variables d'environnement
-import time        # Pour mesurer les temps de chargement
-import json        # Lecture / écriture de fichiers JSON
-import requests    # Pour faire des requêtes HTTP (API Serper.dev)
-import logging     # Pour journaliser actions et erreurs
-from datetime import datetime  # Pour horodatage précis
-from fpdf import FPDF         # Pour générer des fichiers PDF
-import autogen                 # Pour créer et gérer les agents LLM
-from langchain_community.vectorstores import FAISS  # Vectorstore FAISS pour RAG
+# === pp_agent.py - VERSION CLOUD-SAFE ===
+import os
+import time
+import json
+import logging
+from datetime import datetime
+import requests
+from fpdf import FPDF
+import autogen
+from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from mcp_client import send_to_mcp
 
-from mcp_client import send_to_mcp  # Pour envoyer logs et données au MCP
-
-# === CONFIG LOGGING ===
+# === LOGGING ===
 logging.basicConfig(
-    level=logging.INFO,  # Niveau minimum INFO (affiche INFO, WARNING, ERROR)
-    format="%(asctime)s - %(levelname)s - %(message)s"  # Format des logs
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)  # Logger principal pour ce module
+logger = logging.getLogger(__name__)
 
-# === CONFIGURATION OLLAMA ===
-os.environ["OPENAI_API_BASE"] = "http://localhost:11434/v1"  # Serveur Ollama local
-os.environ["OPENAI_API_KEY"] = "ollama"  # Clé API pour Ollama
+# === CONFIGURATION ENVIRONNEMENT ===
+USE_OLLAMA = os.environ.get("USE_OLLAMA", "1") == "1"
 
-# === CONFIGURATION LLM ===
-# Paramètres pour utiliser le modèle Mistral via Ollama
-config_list = [{
-    "model": "mistral",
-    "base_url": "http://localhost:11434/v1",
-    "api_key": "ollama",
-    "price": [0.0, 0.0],  # Prix fictif pour suivi
-}]
 llm_config = {
-    "config_list": config_list,
-    "cache_seed": 42,  # Seed pour reproductibilité
-    "model": "mistral",          # modèle installé avec ollama pull mistral
-    "model_client": "ollama",    # force Autogen à utiliser Ollama (pas OpenAI)
-    "base_url": "http://localhost:11434/v1",
-    "api_key": "ollama",
+    "model": "mistral",
     "temperature": 0.7,
-    
 }
 
-# === MÉMOIRE GLOBALE ===
-chat_history = []  # Historique complet de la session
-_vector_db = None  # Référence globale au vectorstore FAISS (chargé une seule fois)
-WEB_SEARCH_CACHE = {}  # Cache local pour éviter requêtes web répétées
+if USE_OLLAMA:
+    llm_config.update({
+        "model_client": "ollama",
+        "base_url": "http://localhost:11434/v1",
+        "api_key": "ollama"
+    })
+else:
+    llm_config.update({
+        "model_client": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": os.environ.get("OPENAI_API_KEY", ""),
+    })
+    if not llm_config["api_key"]:
+        logger.warning("❌ OPENAI_API_KEY non défini. Les réponses LLM ne fonctionneront pas sur Cloud.")
 
-# === FONCTION : Charger le vectorstore FAISS ===
+# === MÉMOIRE GLOBALE ===
+chat_history = []
+_vector_db = None
+WEB_SEARCH_CACHE = {}
+
+# === Vectorstore FAISS ===
 def get_vector_db():
-    """
-    Charge le vectorstore FAISS contenant les embeddings des documents.
-    Si déjà chargé, renvoie la référence globale.
-    """
-    global _vector_db  # Permet de modifier la variable globale
-    if _vector_db is None:  # Ne pas recharger si déjà chargé
+    global _vector_db
+    if _vector_db is None:
         try:
-            logger.info("Chargement du vectorstore...")
+            logger.info("Chargement du vectorstore FAISS...")
             start = time.time()
             _vector_db = FAISS.load_local(
-                "vectorstore",  # Chemin local où FAISS est sauvegardé
+                "vectorstore",
                 HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
-                allow_dangerous_deserialization=True,  # Permet la désérialisation
+                allow_dangerous_deserialization=True
             )
             logger.info(f"✓ Vectorstore chargé en {time.time()-start:.2f}s")
         except Exception as e:
-            logger.error(f"Erreur chargement vectorstore: {e}")
+            logger.error(f"Erreur vectorstore: {e}")
             _vector_db = None
-    return _vector_db  # Renvoie le vectorstore
+    return _vector_db
 
-# === FONCTION : RAG (retrieval-augmented generation) ===
+# === RAG ===
 def retrieve_docs(query, k=3):
-    """
-    Recherche les documents les plus pertinents pour la requête dans FAISS.
-    Retourne une concaténation du contenu et des sources.
-    """
-    logger.info(f"🔍 RAG pour: {query!r}")
-    db = get_vector_db()  # Charger le vectorstore
+    db = get_vector_db()
     if db is None:
         return "Erreur: Base de documents indisponible."
-
     try:
-        results = db.similarity_search_with_score(query, k=k)  # Recherche par similarité
+        results = db.similarity_search_with_score(query, k=k)
         if not results:
             return "Aucun document pertinent trouvé."
-
         parts = []
-        for doc, score in sorted(results, key=lambda t: t[1]):  # Trier par score
+        for doc, score in sorted(results, key=lambda t: t[1]):
             src = doc.metadata.get("source", "Inconnu")
             parts.append(f"- Source: {src}\n{doc.page_content}")
         return "Source: Document interne\n" + "\n\n".join(parts)
@@ -104,54 +82,38 @@ def retrieve_docs(query, k=3):
         logger.error(f"Erreur retrieve_docs: {e}")
         return f"Erreur recherche interne: {e}"
 
-# === FONCTION : Recherche web via Serper.dev ===
+# === Recherche web ===
 def search_web(query):
-    """
-    Recherche sur le web via l'API Serper.dev.
-    Retourne titre, snippet et lien du premier résultat.
-    Utilise un cache pour éviter les requêtes répétées.
-    """
     if query in WEB_SEARCH_CACHE:
-        logger.info("⚡ Cache web utilisé")
         return WEB_SEARCH_CACHE[query]
-
     url = "https://google.serper.dev/search"
     headers = {
-        "X-API-KEY": "8eef4a7e0baed98c9676e4380e3d611630ab6314",
+        "X-API-KEY": os.environ.get("SERPER_API_KEY", ""),
         "Content-Type": "application/json"
     }
     payload = {"q": query}
-
     try:
-        logger.info(f"🔍 Recherche web: {query}")
         resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()  # Lève une erreur si code HTTP != 200
+        resp.raise_for_status()
         data = resp.json()
-
         if "organic" not in data or not data["organic"]:
             return "Aucun résultat trouvé sur le web."
-
         top = data["organic"][0]
         result = f"Source: Recherche Web\nTitre: {top.get('title')}\nRésumé: {top.get('snippet')}\nLien: {top.get('link')}"
-        WEB_SEARCH_CACHE[query] = result  # Sauvegarde dans cache
+        WEB_SEARCH_CACHE[query] = result
         return result
     except Exception as e:
         logger.error(f"Erreur search_web: {e}")
         return f"Erreur recherche web: {e}"
 
-# === FONCTION : Exporter l'historique en PDF ===
+# === Export PDF ===
 def export_to_pdf(history, dossier="mes_pdfs"):
-    """
-    Génère un PDF avec toutes les questions et réponses de la session.
-    history: liste de tuples (question, réponse)
-    """
-    dossier_pdf = os.path.join("C:/Users/USER/Desktop/Agent IA", dossier)
+    dossier_pdf = os.path.join(dossier)
     os.makedirs(dossier_pdf, exist_ok=True)
     filename = f"session_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     path = os.path.join(dossier_pdf, filename)
 
     def clean(text):
-        """Nettoie caractères non-ASCII pour éviter erreur PDF"""
         return ''.join(c if ord(c) < 128 or c in "àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ" else "?" for c in text)
 
     pdf = FPDF()
@@ -172,15 +134,11 @@ def export_to_pdf(history, dossier="mes_pdfs"):
     logger.info(f"PDF généré: {path}")
     return path
 
-# === FONCTION : Création des agents Autogen ===
+# === Création agents Autogen ===
 def create_agents():
-    """
-    Crée les agents UserProxyAgent et AssistantAgent pour la session.
-    """
     assistant = autogen.AssistantAgent(
         name="medical_agent",
-        system_message="""Tu es un assistant médical. 
-        
+        system_message="""Tu es un assistant médical.
         Règles:
         - Utilise d'abord retrieve_docs.
         - Si aucun document interne, utilise search_web.
@@ -199,37 +157,29 @@ def create_agents():
     )
     return user_proxy, assistant
 
-# === FONCTION : Répondre à une question ===
+# === Répondre à une question ===
 def answer_question(user_input, chat_history_local=None):
-    """
-    Génère une réponse à une question utilisateur.
-    Combine mémoire locale, RAG et recherche web si nécessaire.
-    """
-    logger.info("="*50)
-    logger.info(f"Question: {user_input}")
-    logger.info("="*50)
-
     global chat_history
-    local_history = chat_history_local if chat_history_local is not None else chat_history
+    local_history = chat_history_local if chat_history_local else chat_history
 
-    # --- MCP : log question utilisateur ---
+    # Log MCP
     send_to_mcp("user_question", {"question": user_input})
 
-    # --- Préparer la mémoire récente (2 derniers échanges) ---
+    # Mémoire récente
     memory_lines = [f"- Q: {q}\n- R: {r[:300]}" for q, r in local_history[-2:]]
     memory_text = "Historique récent:\n" + "\n".join(memory_lines) if memory_lines else ""
 
-    # --- RAG d'abord ---
+    # RAG
     context = retrieve_docs(user_input)
     used = "RAG"
     if "Erreur" in context or "Aucun document" in context:
         context = search_web(user_input)
         used = "WEB"
 
-    # --- MCP : log contexte utilisé ---
+    # MCP log
     send_to_mcp("context_used", {"context": context, "used": used})
 
-    # --- Préparer le prompt pour l'agent ---
+    # Prompt
     user_prompt = f"""{memory_text}
 
 Contexte:
@@ -238,25 +188,16 @@ Contexte:
 Question: {user_input}"""
 
     _, assistant = create_agents()
-    reply = assistant.generate_reply(messages=[{"role": "user", "content": user_prompt}])
-    final = reply.get("content", str(reply)) if isinstance(reply, dict) else str(reply)
+    try:
+        reply = assistant.generate_reply(messages=[{"role": "user", "content": user_prompt}])
+        final = reply.get("content", str(reply)) if isinstance(reply, dict) else str(reply)
+    except Exception as e:
+        logger.error(f"Erreur génération réponse: {e}")
+        final = "❌ Impossible de générer une réponse pour le moment."
 
-    # --- MCP : log réponse finale ---
     send_to_mcp("agent_response", {"response": final})
 
-    # Ajouter à l'historique global si pas de chat local
     if chat_history_local is None:
         chat_history.append((user_input, final))
 
-    logger.info(f"Réponse prête ({used})")
     return final
-
-# === TESTS RAPIDES ===
-if __name__ == "__main__":
-    print("=== TEST pp_agent.py ===")
-    print("→ Test retrieve_docs:")
-    print(retrieve_docs("symptômes grippe")[:300])
-    print("\n→ Test search_web:")
-    print(search_web("symptômes grippe")[:300])
-    print("\n→ Test answer_question:")
-    print(answer_question("Quels sont les symptômes de la grippe ?")[:300])
