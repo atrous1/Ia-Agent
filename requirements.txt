@@ -13,6 +13,7 @@ langchain-community>=0.0.331
 pydantic>=2.11,<3.0
 orjson>=3.9.0
 jsonschema>=4.20.0
+sentence-transformers>=2.2.2  # requis pour RAG
 
 # --- Streamlit et UI ---
 streamlit>=1.32,<2.0
@@ -28,4 +29,7 @@ pyarrow>=12.0
 tqdm>=4.66
 click>=8.2
 regex>=2023.7.23
-fpdf2>=2.7.1
+fpdf2>=2.8.4
+
+# --- Autogen ---
+autogen==0.8.7
