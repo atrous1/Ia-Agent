@@ -28,4 +28,4 @@ pyarrow>=12.0
 tqdm>=4.66
 click>=8.2
 regex>=2023.7.23
-fpdf>=2.7.1
+fpdf2>=2.7.1
