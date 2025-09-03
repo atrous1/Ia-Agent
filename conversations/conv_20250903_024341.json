@@ -1,0 +1,10 @@
+{
+  "title": "Nouvelle conversation",
+  "timestamp": "20250903_024341",
+  "messages": [
+    {
+      "role": "user",
+      "content": "c'est quoi le syndrome sec"
+    }
+  ]
+}

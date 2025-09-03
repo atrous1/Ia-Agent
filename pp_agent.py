@@ -18,7 +18,8 @@ from datetime import datetime  # Pour horodatage précis
 from fpdf import FPDF          # Pour générer des fichiers PDF
 import autogen                 # Pour créer et gérer les agents LLM
 from langchain_community.vectorstores import FAISS  # Vectorstore FAISS pour RAG
-from langchain_huggingface import HuggingFaceEmbeddings  # Embeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 from mcp_client import send_to_mcp  # Pour envoyer logs et données au MCP
 
 # === CONFIG LOGGING ===
