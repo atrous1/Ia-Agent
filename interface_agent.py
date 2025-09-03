@@ -137,7 +137,7 @@ with st.sidebar:
             st.session_state.conv_title = new_title
             save_chat(st.session_state.active_conv, st.session_state.messages, title=new_title)
 
-    st.markdown("<br><center>⚕️ Medical Agent v1.2</center>", unsafe_allow_html=True)
+    st.markdown("<br><center>⚕️ Medical Agent v1.3</center>", unsafe_allow_html=True)
 
 # === HEADER AVEC LOGO ===
 if os.path.exists(logo_path):
