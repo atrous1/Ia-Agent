@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # === CONFIG ENV ===
 USE_CLOUD = os.environ.get("USE_CLOUD", "1") == "1"  # 1 = Mistral Cloud, 0 = Ollama local
 
-llm_config = {"model": "mistral-medium-2505", "temperature": 0.7}
+llm_config = {"model": "mistral-medium-2508", "temperature": 0.7}
 
 if USE_CLOUD:
     llm_config.update({
