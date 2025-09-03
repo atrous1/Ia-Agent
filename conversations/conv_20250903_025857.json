@@ -1,6 +1,6 @@
 {
   "title": "Nouvelle conversation",
-  "timestamp": "20250903_025057",
+  "timestamp": "20250903_025918",
   "messages": [
     {
       "role": "user",
@@ -12,11 +12,7 @@
     },
     {
       "role": "user",
-      "content": "quel est le pourcentage des patients ont développé des symptômes \ncompatibles avec une neuropathie périphérique ?\n"
-    },
-    {
-      "role": "assistant",
-      "content": " Cette étude menée entre 2022 et 2024 sur 1 800 patients atteints de syndrome de Sjögren a révélé que 7,2 % des patients ont développé des symptômes compatibles avec une neuropathie périphérique."
+      "content": "oui\n"
     }
   ]
 }
