@@ -44,6 +44,12 @@ config_list = [{
 llm_config = {
     "config_list": config_list,
     "cache_seed": 42,  # Seed pour reproductibilité
+    "model": "mistral",          # modèle installé avec ollama pull mistral
+    "model_client": "ollama",    # force Autogen à utiliser Ollama (pas OpenAI)
+    "base_url": "http://localhost:11434/v1",
+    "api_key": "ollama",
+    "temperature": 0.7,
+    
 }
 
 # === MÉMOIRE GLOBALE ===
@@ -174,6 +180,7 @@ def create_agents():
     assistant = autogen.AssistantAgent(
         name="medical_agent",
         system_message="""Tu es un assistant médical. 
+        
         Règles:
         - Utilise d'abord retrieve_docs.
         - Si aucun document interne, utilise search_web.
