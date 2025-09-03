@@ -12,21 +12,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # === CONFIG ENV ===
-USE_OLLAMA = os.environ.get("USE_OLLAMA", "1") == "1"
+USE_CLOUD = os.environ.get("USE_CLOUD", "1") == "1"  # 1 = Mistral Cloud, 0 = Ollama local
 
 llm_config = {"model": "mistral", "temperature": 0.7}
-if USE_OLLAMA:
+
+if USE_CLOUD:
+    llm_config.update({
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key": os.environ.get("MISTRAL_API_KEY", "")
+    })
+    if not llm_config["api_key"]:
+        logger.warning("❌ MISTRAL_API_KEY non défini. LLM ne fonctionnera pas.")
+else:
     llm_config.update({
         "base_url": "http://localhost:11434/v1",
         "api_key": "ollama"
     })
-else:
-    llm_config.update({
-        "base_url": "https://api.openai.com/v1",
-        "api_key": os.environ.get("OPENAI_API_KEY", "")
-    })
-    if not llm_config["api_key"]:
-        logger.warning("❌ OPENAI_API_KEY non défini. LLM ne fonctionnera pas sur Cloud.")
 
 # === MÉMOIRE GLOBALE ===
 chat_history = []
