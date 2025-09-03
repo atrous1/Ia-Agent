@@ -27,3 +27,4 @@ pyarrow
 tqdm
 click
 regex
+fpdf 
