@@ -22,23 +22,6 @@ FONCTIONNALITES PRINCIPALES
 
 🔬 Focus scientifique : L’agent cite toujours la source du document utilisé pour éviter les informations non vérifiées.
 
-STRUCTURE DU PROJET
-
-Agent-Medical-IA/
-│
-├─ img/
-│  └─ logo.jfif               # Logo de l’application
-│
-├─ vectorstore/               # Base de connaissances RAG spécialisée Sjögren (FAISS)
-│
-├─ conversations/             # Historique JSON des conversations
-│
-├─ pp_agent.py                # Backend de l’agent IA (RAG, LLM, PDF)
-├─ interface_agent.py         # Interface web Streamlit
-├─ mcp_client.py              # Module MCP pour logs JSONL
-├─ requirements.txt           # Dépendances Python
-└─ README.md                  # Ce fichier
-
 INSTALLATION
 
 1 Cloner le dépôt
