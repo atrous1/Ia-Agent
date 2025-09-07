@@ -43,8 +43,8 @@ INSTALLATION
 
 1 Cloner le dépôt
 
-git clone https://github.com/ton-utilisateur/Agent-Medical-IA.git
-cd Agent-Medical-IA
+git clone https://github.com/atrous1/Ia-Agent
+cd Ia-Agent
 
 2 Créer un environnement Python et installer les dépendances
 
